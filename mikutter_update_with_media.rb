@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 
 Plugin.create :update_with_media do
