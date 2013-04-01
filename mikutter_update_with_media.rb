@@ -1,15 +1,8 @@
+
 # -*- coding: utf-8 -*-
-require 'twitter'
 
 Plugin.create :update_with_media do
 
-  Twitter.configure do |c|
-    c.consumer_key = CHIConfig::TWITTER_CONSUMER_KEY
-    c.consumer_secret = CHIConfig::TWITTER_CONSUMER_SECRET
-    c.oauth_token = UserConfig[:twitter_token]
-    c.oauth_token_secret = UserConfig[:twitter_secret]
-  end
-  @client = Twitter.client
 
   command(:update_with_media,
           name: '画像付きで投稿する',
@@ -63,11 +56,11 @@ Plugin.create :update_with_media do
       dialog.destroy
 
       if filename
-        message = Plugin.create(:gtk).widgetof(opt.widget).widget_post.buffer.text
+        message = scan_message Plugin.create(:gtk).widgetof(opt.widget)
         Thread.new {
-          @client.update_with_media(message, File.new(filename))
+          update_with_media(message, filename)
         }
-        Plugin.create(:gtk).widgetof(opt.widget).widget_post.buffer.text = ''
+        clear Plugin.create(:gtk).widgetof(opt.widget)
       end
 
     rescue Exception => e
@@ -75,5 +68,58 @@ Plugin.create :update_with_media do
     end
   end
 
-end
 
+  def scan_message(postbox)
+    msg = {}
+    msg[:status] = postbox.widget_post.buffer.text
+    msg[:status] += UserConfig[:footer] if postbox.method(:add_footer?).()
+    msg[:replyto] = postbox.method(:service).call()[:id_str] if postbox.method(:reply?).()
+    msg
+  end
+
+  def clear(postbox)
+    postbox.widget_post.buffer.text = ''
+    postbox.destroy if postbox.method(:reply?).()
+  end
+
+  def update_with_media(msg, filename)
+    boundary = 'mikku-mikkued boundary'
+    body = ''
+    body.concat "--#{boundary}\r\n"
+    body.concat "Content-Disposition: form-data; name=\"status\";\r\n"
+    body.concat "\r\n"
+    body.concat "#{msg[:status]}\r\n"
+    if msg[:replyto]
+      body.concat "--#{boundary}\r\n"
+      body.concat "Content-Disposition: form-data; name=\"in_reply_to_status_id\";\r\n\r\n#{msg[:replyto]}"
+    end
+    body.concat "--#{boundary}\r\n"
+    body.concat "Content-Disposition: form-data; name=\"media[]\"; filename=\"#{File.basename filename}\"\r\n"
+    body.concat "Content-Type: image/jpeg\r\n"
+    body.concat "Content-Transfer-Encoding: binary\r\n"
+    body.concat "\r\n"
+    File.open(filename, 'rb') do |f|
+      body.concat f.read.force_encoding "utf-8"
+    end
+    body.concat "\r\n"
+    body.concat "--#{boundary}--\r\n"
+
+    uri = URI.parse 'https://upload.twitter.com/1/statuses/update_with_media.json'
+    https = Net::HTTP.new uri.host, uri.port
+    https.use_ssl = true
+    https.start do |session|
+      request = Net::HTTP::Post.new uri.request_uri
+      request.set_content_type "multipart/form-data; boundary=#{boundary}"
+      request.body = body
+      request['Content-Length'] = request.body.bytesize
+
+      twitter = Service.primary.twitter
+      consumer = OAuth::Consumer.new twitter.consumer_key, twitter.consumer_secret, :site => "https://upload.twitter.com"
+      access_token = OAuth::AccessToken.new consumer, twitter.a_token, twitter.a_secret
+
+      access_token.sign! request
+      p session.request request
+    end
+  end
+
+end
