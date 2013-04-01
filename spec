@@ -5,6 +5,6 @@ depends:
   plugin:
   - gtk
 version: '1.0'
-author: penguin2716
+author: nullpo_head
 name: update with media
 description: update with media
